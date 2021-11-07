@@ -1,7 +1,9 @@
 /*
- * Based on the ESP8266 (Adafruit HUZZAH) Mosquitto MQTT Publish Example (https://github.com/tvarnish)
+ * ESP8266 (Adafruit HUZZAH) Mosquitto MQTT Publish Example
+ * Thomas Varnish (https://github.com/tvarnish), (https://www.instructables.com/member/Tango172)
+ * Made as part of my MQTT Instructable - "How to use MQTT with the Raspberry Pi and ESP8266"
  */
-#include <Bounce2.h> // Used for "debouncing" the pushbutton
+//#include <Bounce2.h> // Used for "debouncing" the pushbutton
 #include <ESP8266WiFi.h> // Enables the ESP8266 to connect to the local network (via WiFi)
 #include <PubSubClient.h> // Allows us to connect to, and publish to the MQTT broker
 
@@ -22,29 +24,12 @@ const char* mqtt_password = "<mqtt broker password>";
 // The client id identifies the ESP8266 device. Think of it a bit like a hostname (Or just a name, like Greg).
 const char* clientID = "<publisher name>";
 
-// Initialise the Pushbutton Bouncer object
-Bounce bouncer = Bounce();
-
 // Initialise the WiFi and MQTT Client objects
 WiFiClient wifiClient;
 PubSubClient client(mqtt_server, 1883, wifiClient); // 1883 is the listener port for the Broker
+boolean lastSensorState = 1;
 
-void setup() {
-  pinMode(ledPin, OUTPUT);
-  pinMode(buttonPin, INPUT);
-
-  // Switch the on-board LED off to start with
-  digitalWrite(ledPin, HIGH);
-
-  // Setup pushbutton Bouncer object
-  bouncer.attach(buttonPin);
-  bouncer.interval(5);
-
-  // Begin Serial on 115200
-  // Remember to choose the correct Baudrate on the Serial monitor!
-  // This is just for debugging purposes
-  Serial.begin(115200);
-
+void connectWifi() {
   Serial.print("Connecting to ");
   Serial.println(ssid);
 
@@ -61,12 +46,22 @@ void setup() {
   Serial.println("WiFi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+}
+
+void setup() {
+  pinMode(ledPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+  
+  connectWifi();
+
+  Serial.begin(115200);
 
   // Connect to MQTT Broker
   // client.connect returns a boolean value to let us know if the connection was successful.
   // If the connection is failing, make sure you are using the correct MQTT Username and Password (Setup Earlier in the Instructable)
   if (client.connect(clientID, mqtt_username, mqtt_password)) {
     Serial.println("Connected to MQTT Broker!");
+    publishMessage("START");
   }
   else {
     Serial.println("Connection to MQTT Broker failed...");
@@ -87,15 +82,34 @@ void publishMessage(char* message) {
   }
 }
 
-void loop() {
-  bouncer.update();
+unsigned int lastUpdateSentAt = 0;
 
-  if (bouncer.rose()) {
-    digitalWrite(ledPin, LOW);
-    publishMessage("CLOSED");
-  }
-  else if (bouncer.fell()) {
+void publishMessageByState(boolean state) {
+  if(state == LOW) {
     digitalWrite(ledPin, HIGH);
+    publishMessage("CLOSED");
+  } else {
+    digitalWrite(ledPin, LOW);
     publishMessage("OPEN");
   }
+  lastUpdateSentAt = millis();
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWifi();
+  }
+
+  boolean sensorState = digitalRead(buttonPin);
+
+  if(sensorState == lastSensorState) {
+    if(millis() > lastUpdateSentAt + (10 * 1000)) {
+      publishMessageByState(sensorState);
+    }
+    
+    return;
+  }
+
+  lastSensorState = sensorState;
+  publishMessageByState(sensorState);
 }
